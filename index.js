@@ -64,6 +64,11 @@ function generateSinglePropertyRestriction(schema) {
 	};
 }
 
+function generateSchemaTableRow(name, isRequired, schema, subSchemas) {
+	var schemaType = getActualType(schema, subSchemas);
+	return `|${name}|${schema.description}|${schemaType}|${isRequired}|\n`;
+}
+
 function generateSchemaSectionText(
 	octothorpes,
 	name,
@@ -73,17 +78,24 @@ function generateSchemaSectionText(
 ) {
 	var schemaType = getActualType(schema, subSchemas);
 
-	var text = [
-		generateElementTitle(
-			octothorpes,
-			name,
-			schemaType,
-			isRequired,
-			schema.enum,
-			schema.example
-		),
-		schema.description,
-	];
+	var text = [];
+
+	if (name || schema.description) {
+		text = text.concat([
+			"<details>\n",
+			"<summary>",
+			generateElementTitle(
+				octothorpes,
+				name,
+				schemaType,
+				isRequired,
+				schema.enum,
+				schema.example
+			),
+			"</summary>",
+			schema.description,
+		]);
+	}
 
 	if (schemaType === "object") {
 		if (schema.properties) {
@@ -118,22 +130,30 @@ function generateSchemaSectionText(
 
 			if (schema.items.allOf) {
 				text.push(
-					"The elements of the array must match *all* of the following properties:"
+					"The elements of the array must" + itemsType === "object"
+						? " be objects that match *all* of the following schemas:"
+						: " match *all* of the following properties:"
 				);
 				validationItems = schema.items.allOf;
 			} else if (schema.items.anyOf) {
 				text.push(
-					"The elements of the array must match *at least one* of the following properties:"
+					"The elements of the array must" + itemsType === "object"
+						? " be objects that match *at least one* of the following schemas:"
+						: " match *at least one* of the following properties:"
 				);
 				validationItems = schema.items.anyOf;
 			} else if (schema.items.oneOf) {
 				text.push(
-					"The elements of the array must match *exactly one* of the following properties:"
+					"The elements of the array must" + itemsType === "object"
+						? " be objects that match *exactly one* of the following schemas:"
+						: " match *exactly one* of the following properties:"
 				);
 				validationItems = schema.items.oneOf;
 			} else if (schema.items.not) {
 				text.push(
-					"The elements of the array must *not* match the following properties:"
+					"The elements of the array must" + itemsType === "object"
+						? " be objects that do *not* match any of the following schemas:"
+						: " *not* match the following properties:"
 				);
 				validationItems = schema.items.not;
 			}
@@ -143,7 +163,7 @@ function generateSchemaSectionText(
 					text = text.concat(
 						generateSchemaSectionText(
 							octothorpes,
-							item.title,
+							item.title ?? name.slice(0, -1),
 							false,
 							item,
 							subSchemas
@@ -207,22 +227,44 @@ function generateSchemaSectionText(
 		text.push(restrictions);
 	}
 
+	if (name || schema.description) text.push("</details>");
 	return text;
 }
 
 function generatePropertySection(octothorpes, schema, subSchemas) {
 	if (schema.properties) {
-		return Object.keys(schema.properties).map(function (propertyKey) {
+		//insert table
+		let table = "|property|description|type|required|\n|---|---|---|---|\n";
+
+		Object.keys(schema.properties).forEach(function (propertyKey) {
 			var propertyIsRequired =
 				schema.required && schema.required.indexOf(propertyKey) >= 0;
-			return generateSchemaSectionText(
-				octothorpes + "#",
-				propertyKey,
-				propertyIsRequired,
-				schema.properties[propertyKey],
-				subSchemas
-			);
+			table =
+				table +
+				generateSchemaTableRow(
+					propertyKey,
+					propertyIsRequired,
+					schema.properties[propertyKey],
+					subSchemas
+				);
 		});
+
+		result = [table].concat(
+			Object.keys(schema.properties).map(function (propertyKey) {
+				var propertyIsRequired =
+					schema.required &&
+					schema.required.indexOf(propertyKey) >= 0;
+				return generateSchemaSectionText(
+					octothorpes + "#",
+					propertyKey,
+					propertyIsRequired,
+					schema.properties[propertyKey],
+					subSchemas
+				);
+			})
+		);
+
+		return result;
 	} else if (schema.oneOf) {
 		var oneOfList = schema.oneOf
 			.map(function (innerSchema) {
@@ -286,8 +328,8 @@ module.exports = function (schema, startingOctothorpes) {
 	}
 
 	if (schema.definitions) {
-		text.push("---");
-		text.push("# Sub Schemas");
+		if (text.length) text.push("---");
+		text.push(text.length ? "# Sub Schemas" : "Sub Schemas");
 		text.push("The schema defines the following additional types:");
 		Object.keys(schema.definitions).forEach(function (subSchemaTypeName) {
 			text.push(
